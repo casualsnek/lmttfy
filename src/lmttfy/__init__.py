@@ -2,7 +2,7 @@ import os
 import signal
 import subprocess
 import platform
-from typing import Callable, Tuple, Any
+from typing import Callable, Tuple, Any, TypeVar
 from functools import wraps
 import threading
 import multiprocessing
@@ -20,6 +20,8 @@ PROCESS_CALL_COUNTER: dict[int, int] = {}
 CALL_STATE_INCOMPLETE: int = 0
 CALL_STATE_SUCCESS: int = 1
 CALL_STATE_ERROR: int = 2
+
+R = TypeVar('R') # Maybe @overload ????
 
 
 class ThreadedCall:
@@ -237,7 +239,7 @@ def invoke_in_thread(max_concurrent_execs=-1):
     Function decorator to return an instance of ThreadedCall when a function is called
     """
 
-    def decorator(function):
+    def decorator(function: Callable[..., R]) -> Callable[..., ThreadedCall]:
         @wraps(function)
         def wrapper(*args, **kwargs):
             fid = id(function)
@@ -265,7 +267,7 @@ def invoke_in_sp(max_concurrent_execs=-1, terminate_on_return=False):
     :param terminate_on_return: Kill the sub-process after it returns, sub threads and everything will be terminated
     """
 
-    def decorator(function):
+    def decorator(function: Callable[..., R]) -> Callable[..., MultiProcessedCall]:
         @wraps(function)
         def wrapper(*args, **kwargs):
             fid = id(function)
