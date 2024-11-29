@@ -1,3 +1,4 @@
+from queue import Empty
 from .exceptions import MaxConcurrentCallsLimitExceedException, BurstWhileNoTaskErrorsException
 from .common import CALL_STATE_INCOMPLETE, CALL_STATE_SUCCESS, CALL_STATE_ERROR, R, pass_
 from typing import Callable, Any, Tuple
@@ -132,7 +133,7 @@ class MultiProcessedCall:
                         if PROCESS_CALL_COUNTER[self.__fid] > 0:
                             logging.info("Decrementing process call counter: fid=%s", self.__fid)
                             PROCESS_CALL_COUNTER[self.__fid] -= 1
-            except TimeoutError:
+            except (TimeoutError, Empty):
                 logging.warning("Timeout occurred in sync state thread for MP: fid=%s", self.__fid)
 
 
