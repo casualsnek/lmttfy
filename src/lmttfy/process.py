@@ -16,6 +16,17 @@ PROCESS_CALL_COUNTER_LOCK = multiprocessing.Lock()
 PROCESS_CALL_COUNTER: dict[int, int] = {}
 
 
+def mp_exec_wrapper(function: Callable[..., Any], queue: multiprocessing.Queue, *args, **kwargs) -> None:
+    """
+            This method gets processed and called to execute the actual function
+            """
+    try:
+        fc_ret = function(*args, **kwargs)
+        queue.put(("success_set", fc_ret))
+    except Exception as e:
+        queue.put(("exception_set", e))
+
+
 class MultiProcessedCall:
     """
     A class representing a multiprocessing call, used to add error handler and completion handler
@@ -32,7 +43,6 @@ class MultiProcessedCall:
         self.__fc_ret = None
         self.__state = CALL_STATE_INCOMPLETE
         self.__fid = fid
-        self.__function = function
         self.__tor = terminate_on_return
         self.__ipcq = multiprocessing.Queue()
         self.__onComplete: Callable[[Any], None] = pass_
@@ -41,7 +51,7 @@ class MultiProcessedCall:
         self.__sync_thread.daemon = True
         self.__sync_thread.start()
         logging.info("Inter process syncing thread started for fid: %s", self.__fid)
-        self.process = multiprocessing.Process(target=self.__exe, args=(self.__ipcq,) + args, kwargs=kwargs)
+        self.process = multiprocessing.Process(target=mp_exec_wrapper, args=(function, self.__ipcq,) + args, kwargs=kwargs)
         self.process.daemon = True
         self.process.start()
         logging.info('Sub-process started for fid: %s', self.__fid)
@@ -81,16 +91,6 @@ class MultiProcessedCall:
             else:
                 self.__sync_thread.join()
         return self.__fc_ret
-
-    def __exe(self, queue: multiprocessing.Queue, *args, **kwargs) -> None:
-        """
-        This method gets processed and called to execute the actual function
-        """
-        try:
-            fc_ret = self.__function(*args, **kwargs)
-            queue.put(("success_set", fc_ret))
-        except Exception as e:
-            queue.put(("exception_set", e))
 
     def __sync_state(self) -> None:
         """
