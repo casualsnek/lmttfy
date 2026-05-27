@@ -90,7 +90,11 @@ class ThreadedCall:
         """
 
         try:
-            self.__fc_ret = self.__function(*args, **kwargs)
+            import asyncio, inspect
+            if inspect.iscoroutinefunction(self.__function):
+                self.__fc_ret = asyncio.run(self.__function(*args, **kwargs))
+            else:
+                self.__fc_ret = self.__function(*args, **kwargs)
             logging.info("The internal func in thread returned successfully: fid=%s", self.__fid)
             self.__state = CALL_STATE_SUCCESS
             self.__onComplete(self.__fc_ret)

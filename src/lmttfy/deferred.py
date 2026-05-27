@@ -357,7 +357,11 @@ class ExternallyDeferredCall:
         """Run the function in a background thread and store state locally."""
         def _run():
             try:
-                ret = self._function(*self._args, **self._kwargs)
+                import asyncio, inspect
+                if inspect.iscoroutinefunction(self._function):
+                    ret = asyncio.run(self._function(*self._args, **self._kwargs))
+                else:
+                    ret = self._function(*self._args, **self._kwargs)
                 with self._lock:
                     self._result = ret
                     self._state = CALL_STATE_SUCCESS

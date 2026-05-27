@@ -23,7 +23,11 @@ def mp_exec_wrapper(function: Callable[..., Any], queue: multiprocessing.Queue, 
             This method gets processed and called to execute the actual function
             """
     try:
-        fc_ret = function(*args, **kwargs)
+        import asyncio, inspect
+        if inspect.iscoroutinefunction(function):
+            fc_ret = asyncio.run(function(*args, **kwargs))
+        else:
+            fc_ret = function(*args, **kwargs)
         queue.put(("success_set", fc_ret))
     except Exception as e:
         queue.put(("exception_set", e))

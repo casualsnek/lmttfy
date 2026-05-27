@@ -93,7 +93,11 @@ def run_server(
                 sem.acquire()
 
             try:
-                result = func(*args, **kwargs)
+                import asyncio, inspect
+                if inspect.iscoroutinefunction(func):
+                    result = asyncio.run(func(*args, **kwargs))
+                else:
+                    result = func(*args, **kwargs)
                 encoded = base64_encode(pickle_dumps(result))
                 client.hset(
                     _task_hash_key(task_id),
