@@ -66,7 +66,7 @@ result_c = task_c.wait()
 
 The same decorators also work with ``async def`` functions.  The decorator
 creates a new event loop in the worker thread (or subprocess) and runs the
-coroutine to completion::
+coroutine to completion:
 
 ```python
 import httpx
@@ -83,8 +83,8 @@ async def fetch_json(url: str) -> dict:
 result = fetch_json("https://api.example.com/data").wait()
 ```
 
-From an async context, use ``async_wait()`` or ``await task`` so the event
-loop stays responsive::
+From an async context, use ``async_wait()`` so the event loop stays
+responsive:
 
 ```python
 import asyncio
@@ -94,12 +94,26 @@ async def main():
     t1 = fetch_json("https://api.example.com/a")
     t2 = fetch_json("https://api.example.com/b")
 
-    # await tasks concurrently -- the worker threads do the work
-    r1, r2 = await asyncio.gather(t1, t2)
+    # both run in worker threads -- await them concurrently
+    r1 = await t1.async_wait()
+    r2 = await t2.async_wait()
     print(r1, r2)
 
 
 asyncio.run(main())
+```
+
+You can also ``await task`` directly (the ``__await__`` protocol delegates to
+``async_wait()``), and gather multiple tasks with ``asyncio.gather``:
+
+```python
+async def main():
+    results = await asyncio.gather(
+        fetch_json("https://api.example.com/a"),
+        fetch_json("https://api.example.com/b"),
+        fetch_json("https://api.example.com/c"),
+    )
+    print(results)
 ```
 
 This pattern works with all three decorators (``@invoke_in_thread``,
