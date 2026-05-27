@@ -11,6 +11,7 @@ import platform
 import multiprocessing
 import threading
 import logging
+import time
 
 # multiprocessing related global variables
 PROCESS_CALL_COUNTER_LOCK = multiprocessing.Lock()
@@ -91,6 +92,19 @@ class MultiProcessedCall:
                 self.__sync_thread.join(timeout=timeout)
             else:
                 self.__sync_thread.join()
+        return self.__fc_ret
+
+    async def async_wait(self, timeout: float = 0) -> Any:
+        """Wait asynchronously without blocking the event loop."""
+        import asyncio
+
+        deadline = None
+        if timeout > 0:
+            deadline = time.monotonic() + timeout
+        while self.__state == CALL_STATE_INCOMPLETE:
+            if deadline is not None and time.monotonic() >= deadline:
+                return None
+            await asyncio.sleep(0.05)
         return self.__fc_ret
 
     def __sync_state(self) -> None:

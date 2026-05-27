@@ -5,6 +5,7 @@ from typing import Callable, Any
 from functools import wraps
 import logging
 import threading
+import time
 
 # threading related global variables
 FUN_CALL_COUNTER_LOCK = threading.Lock()
@@ -68,6 +69,19 @@ class ThreadedCall:
                 self.thread.join(timeout=timeout)
             else:
                 self.thread.join()
+        return self.__fc_ret
+
+    async def async_wait(self, timeout: float = 0) -> Any:
+        """Wait asynchronously without blocking the event loop."""
+        import asyncio
+
+        deadline = None
+        if timeout > 0:
+            deadline = time.monotonic() + timeout
+        while self.__state == CALL_STATE_INCOMPLETE:
+            if deadline is not None and time.monotonic() >= deadline:
+                return None
+            await asyncio.sleep(0.05)
         return self.__fc_ret
 
     def __exe(self, *args, **kwargs) -> None:
