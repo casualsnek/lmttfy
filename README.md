@@ -28,6 +28,8 @@ backends without changing call-site logic.
 
 ## Quick start
 
+### Synchronous functions
+
 ```python
 from lmttfy import invoke_in_thread, invoke_in_sp, deferred_call
 from time import sleep
@@ -59,6 +61,49 @@ result_a = task_a.wait()
 result_b = task_b.wait()
 result_c = task_c.wait()
 ```
+
+### Async functions
+
+The same decorators also work with ``async def`` functions.  The decorator
+creates a new event loop in the worker thread (or subprocess) and runs the
+coroutine to completion::
+
+```python
+import httpx
+
+
+@invoke_in_thread()
+async def fetch_json(url: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url)
+        return resp.json()
+
+
+# From a sync context -- wait() blocks the *calling* thread only:
+result = fetch_json("https://api.example.com/data").wait()
+```
+
+From an async context, use ``async_wait()`` or ``await task`` so the event
+loop stays responsive::
+
+```python
+import asyncio
+
+
+async def main():
+    t1 = fetch_json("https://api.example.com/a")
+    t2 = fetch_json("https://api.example.com/b")
+
+    # await tasks concurrently -- the worker threads do the work
+    r1, r2 = await asyncio.gather(t1, t2)
+    print(r1, r2)
+
+
+asyncio.run(main())
+```
+
+This pattern works with all three decorators (``@invoke_in_thread``,
+``@invoke_in_sp``, ``@deferred_call``).
 
 ## LMTTask API
 
