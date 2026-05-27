@@ -15,7 +15,7 @@ from enum import Enum
 from functools import wraps
 from typing import Any, Callable, List, Optional
 
-from .common import CALL_STATE_INCOMPLETE, CALL_STATE_SUCCESS, CALL_STATE_ERROR, pass_
+from .common import CALL_STATE_INCOMPLETE, CALL_STATE_SUCCESS, CALL_STATE_ERROR, pass_, invoke_callback_sync, invoke_callback_async
 from .exceptions import BurstWhileNoTaskErrorsException
 from .task import LMTTask
 
@@ -331,13 +331,13 @@ class ExternallyDeferredCall:
     def on_complete(self, func: Callable, immediate_callback_if_done: bool = True):
         self._on_complete = func
         if self._state == CALL_STATE_SUCCESS and immediate_callback_if_done:
-            func(self._result)
+            invoke_callback_sync(func, self._result)
         return self
 
     def on_error(self, func: Callable, immediate_callback_if_done: bool = True):
         self._on_error = func
         if self._state == CALL_STATE_ERROR and immediate_callback_if_done:
-            func(self._exception)
+            invoke_callback_sync(func, self._exception)
         return self
 
     # -- internals --------------------------------------------------------
@@ -391,12 +391,12 @@ class ExternallyDeferredCall:
                 with self._lock:
                     self._result = ret
                     self._state = CALL_STATE_SUCCESS
-                    self._on_complete(ret)
+                invoke_callback_sync(self._on_complete, ret)
             except Exception as exc:
                 with self._lock:
                     self._exception = exc
                     self._state = CALL_STATE_ERROR
-                    self._on_error(exc)
+                invoke_callback_sync(self._on_error, exc)
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
@@ -442,7 +442,7 @@ class ExternallyDeferredCall:
                         with self._lock:
                             self._result = _deserialise(raw.decode())
                             self._state = CALL_STATE_SUCCESS
-                            self._on_complete(self._result)
+                        invoke_callback_sync(self._on_complete, self._result)
                         return self._result
                     elif status == "error":
                         err_msg = data.get(b"error", b"unknown error").decode()
@@ -450,7 +450,7 @@ class ExternallyDeferredCall:
                         with self._lock:
                             self._exception = exc
                             self._state = CALL_STATE_ERROR
-                            self._on_error(exc)
+                        invoke_callback_sync(self._on_error, exc)
                         raise exc
 
             if deadline is not None and time.monotonic() >= deadline:
@@ -488,7 +488,7 @@ class ExternallyDeferredCall:
                         with self._lock:
                             self._result = _deserialise(raw.decode())
                             self._state = CALL_STATE_SUCCESS
-                            self._on_complete(self._result)
+                        await invoke_callback_async(self._on_complete, self._result)
                         return self._result
                     elif status == "error":
                         err_msg = data.get(b"error", b"unknown error").decode()
@@ -496,7 +496,7 @@ class ExternallyDeferredCall:
                         with self._lock:
                             self._exception = exc
                             self._state = CALL_STATE_ERROR
-                            self._on_error(exc)
+                        await invoke_callback_async(self._on_error, exc)
                         raise exc
 
             if deadline is not None and time.monotonic() >= deadline:
@@ -521,14 +521,14 @@ class ExternallyDeferredCall:
                 with self._lock:
                     self._result = result
                     self._state = CALL_STATE_SUCCESS
-                    self._on_complete(result)
+                invoke_callback_sync(self._on_complete, result)
                 return result
             elif state == "FAILURE":
                 exc = self._celery_async_result.result
                 with self._lock:
                     self._exception = exc
                     self._state = CALL_STATE_ERROR
-                    self._on_error(exc)
+                invoke_callback_sync(self._on_error, exc)
                 raise exc
 
             time.sleep(0.1)
@@ -550,17 +550,17 @@ class ExternallyDeferredCall:
             state = self._celery_async_result.state
             if state == "SUCCESS":
                 result = self._celery_async_result.result
+                await invoke_callback_async(self._on_complete, result)
                 with self._lock:
                     self._result = result
                     self._state = CALL_STATE_SUCCESS
-                    self._on_complete(result)
                 return result
             elif state == "FAILURE":
                 exc = self._celery_async_result.result
+                await invoke_callback_async(self._on_error, exc)
                 with self._lock:
                     self._exception = exc
                     self._state = CALL_STATE_ERROR
-                    self._on_error(exc)
                 raise exc
 
             await asyncio.sleep(0.1)

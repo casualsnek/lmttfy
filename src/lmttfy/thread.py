@@ -1,4 +1,4 @@
-from .common import CALL_STATE_INCOMPLETE, CALL_STATE_SUCCESS, CALL_STATE_ERROR, R, pass_
+from .common import CALL_STATE_INCOMPLETE, CALL_STATE_SUCCESS, CALL_STATE_ERROR, R, pass_, invoke_callback_sync
 from .exceptions import MaxConcurrentCallsLimitExceedException, BurstWhileNoTaskErrorsException
 from .task import LMTTask
 from typing import Callable, Any
@@ -41,7 +41,7 @@ class ThreadedCall:
         """
         self.__onComplete = func
         if self.__state == CALL_STATE_SUCCESS and immediate_callback_if_done:
-            self.__onComplete(self.__fc_ret)
+            invoke_callback_sync(func, self.__fc_ret)
         return self
 
     def on_error(self, func: Callable, immediate_callback_if_done: bool = True):
@@ -50,7 +50,7 @@ class ThreadedCall:
         """
         self.__onError = func
         if self.__state == CALL_STATE_ERROR and immediate_callback_if_done:
-            self.__onError(self.__exception)
+            invoke_callback_sync(func, self.__exception)
         return self
 
     def burst(self):
@@ -97,12 +97,12 @@ class ThreadedCall:
                 self.__fc_ret = self.__function(*args, **kwargs)
             logging.info("The internal func in thread returned successfully: fid=%s", self.__fid)
             self.__state = CALL_STATE_SUCCESS
-            self.__onComplete(self.__fc_ret)
+            invoke_callback_sync(self.__onComplete, self.__fc_ret)
         except Exception as e:
             logging.info("The internal func in thread errored out: fid=%s", self.__fid)
             self.__exception = e
             self.__state = CALL_STATE_ERROR
-            self.__onError(self)
+            invoke_callback_sync(self.__onError, self)
         with FUN_CALL_COUNTER_LOCK:
             if self.__fid in FUN_CALL_COUNTER and FUN_CALL_COUNTER[self.__fid] > 0:
                 logging.info("Decrementing thread call counter: fid=%s", self.__fid)

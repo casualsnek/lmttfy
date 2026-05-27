@@ -1,6 +1,6 @@
 from queue import Empty
 from .exceptions import MaxConcurrentCallsLimitExceedException, BurstWhileNoTaskErrorsException
-from .common import CALL_STATE_INCOMPLETE, CALL_STATE_SUCCESS, CALL_STATE_ERROR, R, pass_
+from .common import CALL_STATE_INCOMPLETE, CALL_STATE_SUCCESS, CALL_STATE_ERROR, R, pass_, invoke_callback_sync
 from .task import LMTTask
 from typing import Callable, Any, Tuple
 from functools import wraps
@@ -68,7 +68,7 @@ class MultiProcessedCall:
         """
         self.__onComplete = func
         if self.__state == CALL_STATE_SUCCESS and immediate_callback_if_done:
-            self.__onComplete(self.__fc_ret)
+            invoke_callback_sync(func, self.__fc_ret)
         return self
 
     def on_error(self, func: Callable, immediate_callback_if_done: bool = True):
@@ -77,7 +77,7 @@ class MultiProcessedCall:
         """
         self.__onError = func
         if self.__state == CALL_STATE_ERROR and immediate_callback_if_done:
-            self.__onError(self.__exception)
+            invoke_callback_sync(func, self.__exception)
         return self
 
     def burst(self):
@@ -144,9 +144,9 @@ class MultiProcessedCall:
                                 os.kill(self.process.pid, signal.SIGKILL)
                     # run on complete callbacks
                     if self.__state == CALL_STATE_SUCCESS:
-                        self.__onComplete(self.__fc_ret)
+                        invoke_callback_sync(self.__onComplete, self.__fc_ret)
                     elif self.__state == CALL_STATE_ERROR:
-                        self.__onError(self.__exception)
+                        invoke_callback_sync(self.__onError, self.__exception)
                     # clear the counter
                     with PROCESS_CALL_COUNTER_LOCK:
                         if PROCESS_CALL_COUNTER[self.__fid] > 0:
