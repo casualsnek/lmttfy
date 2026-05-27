@@ -22,9 +22,9 @@ preserves the original function signature:
 | `@invoke_in_sp()` | Subprocess (multiprocessing) | CPU-bound work, GIL-free parallelism |
 | `@deferred_call()` | Redis / Valkey queue | Distributed tasks, async offloading |
 
-All three return an `LMTTask` instance with an identical API (`wait`, `burst`,
-`on_complete`, `on_error`), so code can switch between backends without
-changing call-site logic.
+All three return an `LMTTask` instance with an identical API (`wait`,
+`async_wait`, `burst`, `on_complete`, `on_error`), so code can switch between
+backends without changing call-site logic.
 
 ## Quick start
 
@@ -78,6 +78,33 @@ Blocks until the wrapped function returns.  Returns the return value, or
 ```python
 result = task.wait()            # block until done
 result = task.wait(timeout=5.0) # wait at most 5 seconds
+```
+
+### async_wait(timeout=0)
+
+Coroutine that waits without blocking the event loop.  Uses `asyncio.sleep`
+internally for polling, so the event loop stays responsive.  Can be called
+from FastAPI endpoints, async views, or any `async def` context.
+
+```python
+result = await task.async_wait()
+result = await task.async_wait(timeout=5.0)
+```
+
+The `__await__` protocol is supported so you can also use `await task`
+directly:
+
+```python
+result = await task    # equivalent to await task.async_wait()
+```
+
+Multiple tasks can be gathered concurrently without blocking:
+
+```python
+import asyncio
+
+t1, t2, t3 = fetch_url("a"), fetch_url("b"), fetch_url("c")
+results = await asyncio.gather(t1, t2, t3)
 ```
 
 ### burst()
@@ -144,8 +171,8 @@ models).  The `max_concurrent_execs` parameter limits concurrent
 subprocesses per function.
 
 Note: the decorated function must be importable (not defined inside
-`__main__`) — this is a standard requirement for
-`multiprocessing`.
+`__main__`) -- this is a standard requirement for `multiprocessing`,
+especially on Windows where the `spawn` start method is used.
 
 ## Deferred (remote) execution
 
@@ -160,23 +187,64 @@ def send_email(to: str, subject: str, body: str) -> dict:
     ...
 ```
 
-When called, the decorator attempts to connect to Redis (or Valkey).
-- If the backend is reachable: the call is serialised and pushed to a
-  queue (`lmttfy:queue`).  An `LMTTask` is returned immediately; the
-  caller can `wait()` for the result (which polls Redis).
-- If the backend is *not* reachable and `allow_local=True` (the default):
+When called, the decorator attempts to connect to a Redis (or Valkey) backend:
+- If the backend is reachable: the call is serialised and pushed to a queue
+  (`lmttfy:queue`).  An `LMTTask` is returned immediately; the caller can
+  `wait()` or `async_wait()` for the result (which polls Redis).
+- If the backend is **not** reachable and `allow_local=True` (the default):
   the function runs in a background thread in the current process.
-- If the backend is *not* reachable and `allow_local=False`:
+- If the backend is **not** reachable and `allow_local=False`:
   `RuntimeError` is raised immediately.
 
-The Redis URL can be set via the `redis_url` parameter or the
-`LMTTFY_REDIS_URL` environment variable (default:
-`redis://127.0.0.1:6379/0`).
+### Client configuration
+
+Global configuration for the deferred client is managed through
+`configure_deferred()`:
+
+```python
+from lmttfy.deferred import configure_deferred, DeferStrategy
+
+configure_deferred(
+    urls=[
+        "redis://server1:6379/0",
+        "redis://server2:6379/0",
+        "redis://server3:6379/0",
+    ],
+    password="PLACEHOLDER_REDIS_PASSWORD",
+    strategy=DeferStrategy.ROUND_ROBIN,
+)
+```
+
+Parameters:
+
+- **urls** -- One or more Redis/Valkey URLs.  When the decorator is called
+  without an explicit `redis_url`, the client tries these URLs using the
+  configured strategy.
+- **password** -- Connection password (applied to URLs that do not already
+  carry credentials).
+- **strategy** -- Server-selection strategy for distributing tasks across
+  multiple URLs (see below).
+
+The same settings can be provided through environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LMTTFY_DEFERRED_URLS` | `redis://127.0.0.1:6379/0` | Comma-separated list of URLs |
+| `LMTTFY_DEFERRED_PASSWORD` | (none) | Connection password |
+| `LMTTFY_DEFERRED_STRATEGY` | `first-available` | `first-available`, `round-robin`, or `random` |
+
+### Server-selection strategies
+
+| Strategy | Behaviour |
+|----------|-----------|
+| `DeferStrategy.FIRST_AVAILABLE` | Always tries the first URL in the list |
+| `DeferStrategy.ROUND_ROBIN` | Cycles through URLs in order across calls |
+| `DeferStrategy.RANDOM` | Picks a random URL for each call |
 
 ### Task server
 
-A standalone worker process must be running to consume tasks from the
-queue when the backend is used in remote mode.
+A standalone worker process must be running to consume tasks from the queue
+when the backend is used in remote mode.
 
 ```bash
 # install the package, then:
@@ -202,6 +270,23 @@ The server:
 - Optionally limits concurrent executions per function name via
   `max_threads_per_func`
 - Handles SIGINT / SIGTERM for graceful shutdown
+
+## Windows compatibility
+
+On Windows, `multiprocessing` uses the `spawn` start method, which requires
+the target function to be importable by module path.  Functions decorated
+with `@invoke_in_sp()` must be defined in an importable module (not in
+`__main__`).
+
+To test Windows-like behaviour on Linux, set the `LMTTFY_TEST_SPAWN`
+environment variable:
+
+```bash
+LMTTFY_TEST_SPAWN=1 python -m pytest tests/
+```
+
+This switches `multiprocessing` to `spawn` mode and propagates the source
+directory to child processes via `PYTHONPATH`.
 
 ## Exceptions
 
