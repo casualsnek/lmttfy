@@ -1,11 +1,12 @@
 from .common import CALL_STATE_INCOMPLETE, CALL_STATE_SUCCESS, CALL_STATE_ERROR, R, pass_
 from .exceptions import MaxConcurrentCallsLimitExceedException, BurstWhileNoTaskErrorsException
+from .task import LMTTask
 from typing import Callable, Any
 from functools import wraps
 import logging
 import threading
 
-# Threading related global variables
+# threading related global variables
 FUN_CALL_COUNTER_LOCK = threading.Lock()
 FUN_CALL_COUNTER: dict[int, int] = {}
 
@@ -62,7 +63,7 @@ class ThreadedCall:
         Wait for the wrapped function to return or error-out
         """
         if self.__state == CALL_STATE_INCOMPLETE:
-            # Return or error is set when the wrapped function finishes execution, and thread dies at that point
+            # return or error is set when the wrapped function finishes execution, and thread dies at that point
             if timeout > 0:
                 self.thread.join(timeout=timeout)
             else:
@@ -73,8 +74,7 @@ class ThreadedCall:
         """
         This method gets threaded and called to execute the actual function
         """
-        # self.__fc_ret = None
-        # self.__state = [0, 0]
+
         try:
             self.__fc_ret = self.__function(*args, **kwargs)
             logging.info("The internal func in thread returned successfully: fid=%s", self.__fid)
@@ -86,7 +86,7 @@ class ThreadedCall:
             self.__state = CALL_STATE_ERROR
             self.__onError(self)
         with FUN_CALL_COUNTER_LOCK:
-            if FUN_CALL_COUNTER[self.__fid] > 0:
+            if self.__fid in FUN_CALL_COUNTER and FUN_CALL_COUNTER[self.__fid] > 0:
                 logging.info("Decrementing thread call counter: fid=%s", self.__fid)
                 FUN_CALL_COUNTER[self.__fid] = FUN_CALL_COUNTER[self.__fid] - 1
 
@@ -96,7 +96,7 @@ def invoke_in_thread(max_concurrent_execs=-1):
     Function decorator to return an instance of ThreadedCall when a function is called
     """
 
-    def decorator(function: Callable[..., R]) -> Callable[..., ThreadedCall]:
+    def decorator(function: Callable[..., R]) -> Callable[..., LMTTask]:
         @wraps(function)
         def wrapper(*args, **kwargs):
             fid = id(function)
@@ -110,7 +110,7 @@ def invoke_in_thread(max_concurrent_execs=-1):
                         FUN_CALL_COUNTER[fid] = FUN_CALL_COUNTER[fid] + 1
                 else:
                     FUN_CALL_COUNTER[fid] = 1
-            return ThreadedCall(function, fid, *args, **kwargs)
+            return LMTTask(ThreadedCall(function, fid, *args, **kwargs))
 
         return wrapper
 

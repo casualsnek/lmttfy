@@ -1,6 +1,7 @@
 from queue import Empty
 from .exceptions import MaxConcurrentCallsLimitExceedException, BurstWhileNoTaskErrorsException
 from .common import CALL_STATE_INCOMPLETE, CALL_STATE_SUCCESS, CALL_STATE_ERROR, R, pass_
+from .task import LMTTask
 from typing import Callable, Any, Tuple
 from functools import wraps
 import os
@@ -11,7 +12,7 @@ import multiprocessing
 import threading
 import logging
 
-# Multiprocessing related global variables
+# multiprocessing related global variables
 PROCESS_CALL_COUNTER_LOCK = multiprocessing.Lock()
 PROCESS_CALL_COUNTER: dict[int, int] = {}
 
@@ -85,7 +86,7 @@ class MultiProcessedCall:
         Wait for the wrapped function to return or error-out
         """
         if self.__state == CALL_STATE_INCOMPLETE:
-            # Sync thread terminates once we get error or return value
+            # sync thread terminates once we get error or return value
             if timeout > 0:
                 self.__sync_thread.join(timeout=timeout)
             else:
@@ -109,26 +110,26 @@ class MultiProcessedCall:
                     self.__state = CALL_STATE_ERROR
                     self.__exception = cmd[1]
                 if cmd[0] in ['success_set', 'exception_set']:
-                    # The process returned or errored out
-                    # Kill the process if required
-                    # The process may not die if it's stuck doing I/O stuff, handle it properly
+                    # the process returned or errored out
+                    # kill the process if required
+                    # the process may not die if it's stuck doing I/O stuff, handle it properly
                     if self.__tor and self.process.is_alive():
                         self.process.terminate()
                         self.process.join(timeout=5)
                         if self.process.is_alive():
                             logging.error("Pesky sub-process is still alive, attempting to kill: fid=%s", self.__fid)
-                            # Pesky process is still alive
-                            # If on linux/nix call os.kill with process.pid, and for windows handle differently
+                            # pesky process is still alive
+                            # if on linux/nix call os.kill with process.pid, and for windows handle differently
                             if platform.system() == "Windows":
                                 subprocess.run(["taskkill", "/PID", str(self.process.pid), "/F"], check=True)
                             else:
                                 os.kill(self.process.pid, signal.SIGKILL)
-                    # Run on complete callbacks
+                    # run on complete callbacks
                     if self.__state == CALL_STATE_SUCCESS:
                         self.__onComplete(self.__fc_ret)
                     elif self.__state == CALL_STATE_ERROR:
                         self.__onError(self.__exception)
-                    # Clear the counter
+                    # clear the counter
                     with PROCESS_CALL_COUNTER_LOCK:
                         if PROCESS_CALL_COUNTER[self.__fid] > 0:
                             logging.info("Decrementing process call counter: fid=%s", self.__fid)
@@ -144,7 +145,7 @@ def invoke_in_sp(max_concurrent_execs=-1, terminate_on_return=False):
     :param terminate_on_return: Kill the sub-process after it returns, sub threads and everything will be terminated
     """
 
-    def decorator(function: Callable[..., R]) -> Callable[..., MultiProcessedCall]:
+    def decorator(function: Callable[..., R]) -> Callable[..., LMTTask]:
         @wraps(function)
         def wrapper(*args, **kwargs):
             fid = id(function)
@@ -158,7 +159,7 @@ def invoke_in_sp(max_concurrent_execs=-1, terminate_on_return=False):
                         PROCESS_CALL_COUNTER[fid] += 1
                 else:
                     PROCESS_CALL_COUNTER[fid] = 1
-            return MultiProcessedCall(function, fid, terminate_on_return, *args, **kwargs)
+            return LMTTask(MultiProcessedCall(function, fid, terminate_on_return, *args, **kwargs))
 
         return wrapper
 
