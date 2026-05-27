@@ -10,17 +10,19 @@ description = "Python module that provides decorators to make a function execute
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "GPL-3.0" }
-authors = [
-    { name = "Casual Snek", email = "casualsnek@pm.me" },
-]
+authors = [{ name = "Casual Snek", email = "casualsnek@pm.me" }]
 keywords = ["threading", "multiprocessing", "lmttfy"]
 classifiers = [
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+  "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
 ]
 urls = { Repository = "https://github.com/casualsnek/lmttfy" }
 
 
+[project.scripts]
+lmttfy-defer-server = "lmttfy.defer_server:main"
+
+
 [tool.pytest.ini_options]
 filterwarnings = [
-    'ignore:This process \(pid=\d+\) is multi-threaded, use of fork\(\):DeprecationWarning',
+  'ignore:This process \(pid=\d+\) is multi-threaded, use of fork\(\):DeprecationWarning',
 ]
