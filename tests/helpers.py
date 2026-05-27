@@ -1,14 +1,4 @@
-"""Test helper functions for lmttfy."""
+"""Test helper functions — re-exported from the importable ``lmttfy._test_helpers``
+module so that multiprocessing can pickle them by module reference."""
 
-from time import sleep
-
-
-def sleep_n_add(sleep_sec: float, a: float, b: float) -> float:
-    """Sleep for *sleep_sec* seconds, then return ``a + b``."""
-    sleep(sleep_sec)
-    return a + b
-
-
-def raise_value_error(msg: str = "boom") -> float:
-    """Always raise :exc:`ValueError`."""
-    raise ValueError(msg)
+from lmttfy._test_helpers import sleep_n_add, raise_value_error  # noqa: F401
