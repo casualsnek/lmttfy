@@ -70,6 +70,10 @@ class _DeferredConfig:
     #: Round-robin counter.
     _rr_counter: int = 0
 
+    #: Celery application instance (optional).  When set, ``@deferred_call``
+    #: auto-registers tasks with this app and submits via ``.delay()``.
+    celery_app: Any = None
+
 
 # module-level singleton
 _CONFIG = _DeferredConfig()
@@ -80,6 +84,7 @@ def configure_deferred(
     urls: Optional[List[str]] = None,
     password: Optional[str] = None,
     strategy: Optional[DeferStrategy] = None,
+    celery_app: Any = None,
 ) -> None:
     """Configure the global deferred client settings.
 
@@ -95,6 +100,10 @@ def configure_deferred(
         credentials.
     strategy:
         Server-selection strategy (see :class:`DeferStrategy`).
+    celery_app:
+        A ``celery.Celery`` application instance.  When set, functions
+        decorated with ``@deferred_call`` are auto-registered as Celery
+        tasks and submitted via ``.delay()``.
     """
     with _CONFIG_LOCK:
         if urls is not None:
@@ -103,6 +112,8 @@ def configure_deferred(
             _CONFIG.password = password
         if strategy is not None:
             _CONFIG.strategy = strategy
+        if celery_app is not None:
+            _CONFIG.celery_app = celery_app
 
 
 def _inject_password(url: str, password: Optional[str]) -> str:
@@ -252,12 +263,14 @@ class ExternallyDeferredCall:
         *,
         allow_local: bool = True,
         redis_url: Optional[str] = None,
+        celery_task: Any = None,
     ) -> None:
         self._function = function
         self._args = args
         self._kwargs = kwargs
         self._allow_local = allow_local
         self._redis_url = redis_url
+        self._celery_task = celery_task
 
         self._task_id: Optional[str] = None
         self._client: Any = None
@@ -271,6 +284,8 @@ class ExternallyDeferredCall:
         self._on_error: Callable = pass_
         self._local_thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
+        self._celery_task: Any = None
+        self._celery_async_result: Any = None
 
         self._submit()
 
@@ -306,6 +321,11 @@ class ExternallyDeferredCall:
             return await self._async_poll_result(timeout=timeout)
 
     def burst(self) -> None:
+        # celery: re-raise the captured exception from the worker
+        if self._celery_async_result is not None and self._state == CALL_STATE_ERROR:
+            if isinstance(self._exception, Exception):
+                raise self._exception
+            raise RuntimeError(str(self._exception))
         raise self._exception
 
     def on_complete(self, func: Callable, immediate_callback_if_done: bool = True):
@@ -323,6 +343,12 @@ class ExternallyDeferredCall:
     # -- internals --------------------------------------------------------
 
     def _submit(self):
+        # try celery first (fastest path — no serialisation needed)
+        if self._celery_task is not None:
+            if self._submit_via_celery():
+                return
+            # celery broker unreachable — fall through to redis / local
+
         client, backend = _try_connect_one(self._redis_url)
         if client is not None:
             self._client = client
@@ -376,8 +402,25 @@ class ExternallyDeferredCall:
         t.start()
         self._local_thread = t
 
+    def _submit_via_celery(self) -> bool:
+        """Submit the task through Celery's broker.
+
+        Returns ``True`` on success, ``False`` if the broker is unreachable.
+        """
+        try:
+            async_result = self._celery_task.delay(*self._args, **self._kwargs)
+            self._celery_async_result = async_result
+            self._task_id = async_result.id
+            logger.info("deferred task %s submitted to celery", self._task_id)
+            return True
+        except Exception as exc:
+            logger.warning("celery broker unreachable, falling back: %s", exc)
+            return False
+
     def _poll_result(self, timeout: float = 0) -> Any:
-        """Poll Redis until the task completes or *timeout* expires."""
+        """Poll Redis or Celery until the task completes or *timeout* expires."""
+        if self._celery_async_result is not None:
+            return self._poll_celery_result(timeout=timeout)
         deadline = None
         if timeout > 0:
             deadline = time.monotonic() + timeout
@@ -417,6 +460,8 @@ class ExternallyDeferredCall:
     async def _async_poll_result(self, timeout: float = 0) -> Any:
         """Async variant of _poll_result — uses asyncio.sleep and
         run_in_executor for redis calls so the event loop is not blocked."""
+        if self._celery_async_result is not None:
+            return await self._async_poll_celery_result(timeout=timeout)
         import asyncio
 
         loop = asyncio.get_running_loop()
@@ -458,6 +503,68 @@ class ExternallyDeferredCall:
                 return None
             await asyncio.sleep(0.1)
 
+    def _poll_celery_result(self, timeout: float = 0) -> Any:
+        """Poll Celery ``AsyncResult`` until the task completes."""
+        deadline = None
+        if timeout > 0:
+            deadline = time.monotonic() + timeout
+        while True:
+            with self._lock:
+                if self._state != CALL_STATE_INCOMPLETE:
+                    return self._result
+            if deadline is not None and time.monotonic() >= deadline:
+                return None
+
+            state = self._celery_async_result.state
+            if state == "SUCCESS":
+                result = self._celery_async_result.result
+                with self._lock:
+                    self._result = result
+                    self._state = CALL_STATE_SUCCESS
+                    self._on_complete(result)
+                return result
+            elif state == "FAILURE":
+                exc = self._celery_async_result.result
+                with self._lock:
+                    self._exception = exc
+                    self._state = CALL_STATE_ERROR
+                    self._on_error(exc)
+                raise exc
+
+            time.sleep(0.1)
+
+    async def _async_poll_celery_result(self, timeout: float = 0) -> Any:
+        """Async variant — poll Celery ``AsyncResult`` without blocking the event loop."""
+        import asyncio
+
+        deadline = None
+        if timeout > 0:
+            deadline = time.monotonic() + timeout
+        while True:
+            with self._lock:
+                if self._state != CALL_STATE_INCOMPLETE:
+                    return self._result
+            if deadline is not None and time.monotonic() >= deadline:
+                return None
+
+            state = self._celery_async_result.state
+            if state == "SUCCESS":
+                result = self._celery_async_result.result
+                with self._lock:
+                    self._result = result
+                    self._state = CALL_STATE_SUCCESS
+                    self._on_complete(result)
+                return result
+            elif state == "FAILURE":
+                exc = self._celery_async_result.result
+                with self._lock:
+                    self._exception = exc
+                    self._state = CALL_STATE_ERROR
+                    self._on_error(exc)
+                raise exc
+
+            await asyncio.sleep(0.1)
+
 
 # ---------------------------------------------------------------------------
 # decorator
@@ -467,7 +574,13 @@ def deferred_call(
     allow_local: bool = True,
     redis_url: Optional[str] = None,
 ):
-    """Decorator that dispatches function calls through a Redis/Valkey queue.
+    """Decorator that dispatches function calls through a Celery, Redis/Valkey
+    queue, or runs locally as a fallback.
+
+    Backend priority
+        Celery (if configured via :func:`configure_deferred`) >
+        Redis/Valkey (if reachable) >
+        local in-process thread (if ``allow_local=True``)
 
     When a queue backend is reachable the call is pushed as a remote task
     and an :class:`LMTTask` wrapping an :class:`ExternallyDeferredCall` is
@@ -480,16 +593,21 @@ def deferred_call(
     Parameters
     ----------
     allow_local:
-        Fall back to in-process threaded execution when Redis/Valkey is
-        unavailable.
+        Fall back to in-process threaded execution when no remote backend is
+        reachable.
     redis_url:
-        Redis/Valkey connection URL.  Overrides the global config (see
-        :func:`configure_deferred` and the ``LMTTFY_DEFERRED_URLS`` / ``LMTTFY_REDIS_URL``
-        environment variables).  Default ``redis://127.0.0.1:6379/0``.
+        Redis/Valkey connection URL.  Overrides the global Redis config.
+        Default ``redis://127.0.0.1:6379/0`` (or the first URL from
+        :func:`configure_deferred` / ``LMTTFY_DEFERRED_URLS``).
 
     Usage::
 
-        from lmttfy.deferred import deferred_call
+        from lmttfy.deferred import deferred_call, configure_deferred
+        from celery import Celery
+
+        # optional: wire up a Celery app
+        app = Celery("tasks", broker="redis://localhost:6379/0")
+        configure_deferred(celery_app=app)
 
         @deferred_call()
         def process_order(order_id: str) -> dict:
@@ -501,6 +619,20 @@ def deferred_call(
     """
 
     def decorator(function: Callable) -> Callable[..., LMTTask]:
+        # auto-register with Celery if a Celery app is configured
+        celery_task = None
+        with _CONFIG_LOCK:
+            if _CONFIG.celery_app is not None:
+                try:
+                    celery_task = _CONFIG.celery_app.task(
+                        function, name=_qualname(function)
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "failed to register %s with celery: %s",
+                        _qualname(function), exc,
+                    )
+
         @wraps(function)
         def wrapper(*args: Any, **kwargs: Any) -> LMTTask:
             return LMTTask(
@@ -508,6 +640,7 @@ def deferred_call(
                     function, args, kwargs,
                     allow_local=allow_local,
                     redis_url=redis_url,
+                    celery_task=celery_task,
                 )
             )
 

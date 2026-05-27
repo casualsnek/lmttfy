@@ -16,6 +16,10 @@ classifiers = [
   "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
 ]
 urls = { Repository = "https://github.com/casualsnek/lmttfy" }
+dependencies = [
+    "celery>=5.6.3",
+    "redis>=7.4.0",
+]
 
 
 [tool.setuptools]
@@ -30,4 +34,10 @@ lmttfy-defer-server = "lmttfy.defer_server:main"
 [tool.pytest.ini_options]
 filterwarnings = [
   'ignore:This process \(pid=\d+\) is multi-threaded, use of fork\(\):DeprecationWarning',
+]
+
+[dependency-groups]
+dev = [
+    "anyio>=4.13.0",
+    "pytest>=9.0.3",
 ]
