@@ -57,7 +57,7 @@ class ThreadedCall:
         """
         raise self.__exception
 
-    def wait(self, timeout: int = 0) -> Any:
+    def wait(self, timeout: float = 0) -> Any:
         """
         Wait for the wrapped function to return or error-out
         """

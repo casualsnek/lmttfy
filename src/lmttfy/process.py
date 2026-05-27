@@ -80,7 +80,7 @@ class MultiProcessedCall:
         """
         raise self.__exception
 
-    def wait(self, timeout: int = 0) -> Any:
+    def wait(self, timeout: float = 0) -> Any:
         """
         Wait for the wrapped function to return or error-out
         """
@@ -134,7 +134,7 @@ class MultiProcessedCall:
                             logging.info("Decrementing process call counter: fid=%s", self.__fid)
                             PROCESS_CALL_COUNTER[self.__fid] -= 1
             except (TimeoutError, Empty):
-                logging.warning("Timeout occurred in sync state thread for MP: fid=%s", self.__fid)
+                pass
 
 
 def invoke_in_sp(max_concurrent_execs=-1, terminate_on_return=False):
