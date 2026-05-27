@@ -10,9 +10,7 @@ from lmttfy.exceptions import MaxConcurrentCallsLimitExceedException, BurstWhile
 from tests.helpers import sleep_n_add, raise_value_error
 
 
-# ---------------------------------------------------------------------------
-# Basic smoke tests
-# ---------------------------------------------------------------------------
+# basic smoke tests
 
 class TestInvokeInThread:
     """Basic sanity checks for the threaded decorator."""
@@ -42,13 +40,11 @@ class TestInvokeInThread:
         f = invoke_in_thread()(sleep_n_add)
         result = f(2, 1, 2)
         assert result.wait(timeout=0.01) is None  # still incomplete
-        # A subsequent wait without timeout gets the value
+        # a subsequent wait without timeout gets the value
         assert result.wait() == 3
 
 
-# ---------------------------------------------------------------------------
-# Error handling
-# ---------------------------------------------------------------------------
+# error handling
 
 class TestThreadedCallErrors:
     """Error propagation and :meth:`~ThreadedCall.burst` behaviour."""
@@ -90,9 +86,7 @@ class TestThreadedCallErrors:
         assert str(collected[0]) == "callback_err"
 
 
-# ---------------------------------------------------------------------------
-# Concurrency limiting
-# ---------------------------------------------------------------------------
+# concurrency limiting
 
 class TestThreadedCallConcurrency:
     """Max-concurrent-calls guard."""
@@ -101,15 +95,15 @@ class TestThreadedCallConcurrency:
         """Calling beyond *max_concurrent_execs* raises immediately."""
         f = invoke_in_thread(max_concurrent_execs=2)(sleep_n_add)
 
-        # Start two calls (they stay in-flight for 1 s each)
+        # start two calls (they stay in-flight for 1 s each)
         c1 = f(1, 0, 0)
         c2 = f(1, 0, 0)
 
-        # Third call should be rejected
+        # third call should be rejected
         with pytest.raises(MaxConcurrentCallsLimitExceedException):
             f(1, 0, 0)
 
-        # Let the first two finish
+        # let the first two finish
         c1.wait()
         c2.wait()
 
@@ -120,6 +114,6 @@ class TestThreadedCallConcurrency:
         c1 = f(0.1, 1, 2)
         c1.wait()
 
-        # Now a new call should succeed
+        # now a new call should succeed
         c2 = f(0.1, 3, 4)
         assert c2.wait() == 7

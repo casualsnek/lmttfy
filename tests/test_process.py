@@ -10,9 +10,7 @@ from lmttfy.exceptions import MaxConcurrentCallsLimitExceedException, BurstWhile
 from tests.helpers import sleep_n_add, raise_value_error
 
 
-# ---------------------------------------------------------------------------
-# Basic smoke tests
-# ---------------------------------------------------------------------------
+# basic smoke tests
 
 class TestInvokeInSP:
     """Basic sanity checks for the subprocess decorator."""
@@ -42,13 +40,11 @@ class TestInvokeInSP:
         f = invoke_in_sp()(sleep_n_add)
         result = f(2, 1, 2)
         assert result.wait(timeout=0.01) is None  # still incomplete
-        # A subsequent wait without timeout gets the value
+        # a subsequent wait without timeout gets the value
         assert result.wait() == 3
 
 
-# ---------------------------------------------------------------------------
-# Error handling
-# ---------------------------------------------------------------------------
+# error handling
 
 class TestMultiProcessedCallErrors:
     """Error propagation and :meth:`~MultiProcessedCall.burst` behaviour."""
@@ -90,9 +86,7 @@ class TestMultiProcessedCallErrors:
         assert str(collected[0]) == "callback_err"
 
 
-# ---------------------------------------------------------------------------
-# Concurrency limiting
-# ---------------------------------------------------------------------------
+# concurrency limiting
 
 class TestMultiProcessedCallConcurrency:
     """Max-concurrent-calls guard."""

@@ -11,12 +11,12 @@ import sys
 from pathlib import Path
 
 
-# Add the src directory to sys.path so that lmttfy can be imported
+# add the src directory to sys.path so that lmttfy can be imported
 _src = str(Path(__file__).resolve().parent.parent / "src")
 if _src not in sys.path:
     sys.path.insert(0, _src)
 
-# Use fork so that multiprocessing.Process inherits memory from the parent,
+# use fork so that multiprocessing.Process inherits memory from the parent,
 # avoiding pickling issues for functions defined inside tests.
 #
 # force=True lets us override the forkserver/spawn default on Python 3.14+.
