@@ -1,6 +1,6 @@
 """Unified task wrapper that provides a consistent API across all executors."""
 
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 
 class LMTTask:
@@ -15,6 +15,10 @@ class LMTTask:
         result = task.wait()
         result = task.wait(timeout=5.0)
 
+        # async: await without blocking the event loop
+        result = await task.async_wait()
+        result = await task              # same as async_wait()
+
         # raise the captured exception, if any
         task.burst()
 
@@ -28,12 +32,31 @@ class LMTTask:
         self._task = task
 
     def wait(self, timeout: float = 0) -> Any:
-        """Wait for the wrapped function to return or error-out.
+        """Wait (synchronously) for the wrapped function to return or error-out.
+
+        Returns the return value, or ``None`` when *timeout* expires before
+        the task completes.
+
+        In async contexts prefer :meth:`async_wait` or ``await task`` to avoid
+        blocking the event loop.
+        """
+        return self._task.wait(timeout=timeout)
+
+    async def async_wait(self, timeout: float = 0) -> Optional[Any]:
+        """Wait (asynchronously) for the wrapped function to return or error-out.
+
+        Uses ``asyncio.sleep`` internally so it does **not** block the event
+        loop.  Can be used safely inside FastAPI endpoints and other async
+        frameworks.
 
         Returns the return value, or ``None`` when *timeout* expires before
         the task completes.
         """
-        return self._task.wait(timeout=timeout)
+        return await self._task.async_wait(timeout=timeout)
+
+    def __await__(self):
+        """Allow ``await task`` as a shorthand for ``await task.async_wait()``."""
+        return self.async_wait().__await__()
 
     def burst(self) -> None:
         """Raise the captured exception from the task, if any."""
